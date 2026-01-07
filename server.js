@@ -1,25 +1,49 @@
-
-// veilo minimal relay server
 const express = require("express");
+const crypto = require("crypto");
+
 const app = express();
 app.use(express.json());
 
-const inbox = {}; // RAM-only (server restart হলে clear)
+const USERS = {};      // username -> token
+const MESSAGES = [];  // encrypted messages
 
+function generateToken() {
+  return crypto.randomBytes(16).toString("hex");
+}
+
+/* LOGIN */
+app.post("/login", (req, res) => {
+  const { username } = req.body;
+  if (!username) return res.status(400).json({ error: "username required" });
+
+  let token = USERS[username];
+  if (!token) {
+    token = generateToken();
+    USERS[username] = token;
+  }
+
+  res.json({ token });
+});
+
+/* SEND MESSAGE */
 app.post("/send", (req, res) => {
-  const { to, data } = req.body;
-  if (!to || !data) return res.status(400).send("bad request");
-  inbox[to] = inbox[to] || [];
-  inbox[to].push(data); // encrypted blob
-  res.send("ok");
+  const { token, to, msg } = req.body;
+
+  const from = Object.keys(USERS).find(u => USERS[u] === token);
+  if (!from) return res.status(401).json({ error: "invalid token" });
+
+  MESSAGES.push({ from, to, msg });
+  res.json({ ok: true });
 });
 
-app.get("/recv/:user", (req, res) => {
-  const user = req.params.user;
-  const msgs = inbox[user] || [];
-  inbox[user] = [];
-  res.json(msgs); // encrypted blobs
+/* RECEIVE MESSAGE */
+app.get("/recv/:token", (req, res) => {
+  const token = req.params.token;
+  const user = Object.keys(USERS).find(u => USERS[u] === token);
+  if (!user) return res.status(401).json({ error: "invalid token" });
+
+  const msgs = MESSAGES.filter(m => m.to === user);
+  res.json(msgs);
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Veilo relay running"));
+app.listen(3000, () => console.log("Veilo server running"));
